@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Pitch Trace</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Live Pitch Trace</h1>
+      <p class="subtitle">Track your singing pitch against a target note or scale in real time.</p>
+    </header>
+
+    <section class="controls" aria-label="Pitch controls">
+      <div class="control-group">
+        <label for="mode">Target Mode</label>
+        <select id="mode">
+          <option value="single">Single Note</option>
+          <option value="scale">Scale</option>
+        </select>
+      </div>
+
+      <div class="control-group" id="single-note-group">
+        <label for="target-note">Target Note</label>
+        <select id="target-note"></select>
+      </div>
+
+      <div class="control-group hidden" id="scale-group">
+        <label for="target-scale">Scale</label>
+        <select id="target-scale">
+          <option value="C_major">C Major</option>
+          <option value="G_major">G Major</option>
+          <option value="D_major">D Major</option>
+          <option value="A_minor">A Minor</option>
+          <option value="E_minor">E Minor</option>
+          <option value="Pentatonic_C">C Pentatonic</option>
+        </select>
+      </div>
+
+      <div class="control-group actions">
+        <button id="start-btn" type="button">Start Monitoring</button>
+        <button id="stop-btn" type="button" disabled>Stop</button>
+      </div>
+    </section>
+
+    <section class="status-panel" aria-live="polite">
+      <div class="status-item">
+        <span class="status-label">Detected</span>
+        <strong id="detected-note">--</strong>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Frequency</span>
+        <strong id="detected-frequency">-- Hz</strong>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Tuning</span>
+        <strong id="tuning-status">Not started</strong>
+      </div>
+    </section>
+
+    <section class="viz-panel">
+      <canvas id="pitch-canvas" width="1120" height="460" aria-label="Live pitch trace"></canvas>
+      <p class="hint">Green trace means in tune (within 25 cents). Red means out of tune.</p>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
