@@ -5,7 +5,13 @@ const A4_FREQ = 440;
 const CANVAS_WIDTH = 1320;
 const CANVAS_HEIGHT = 560;
 const TRACE_POINTS = 820;
-const IN_TUNE_CENTS = 25;
+const DEFAULT_IN_TUNE_CENTS = 25;
+const REFERENCE_SYNC_DELAY_MS = 90;
+const DEFAULT_MIN_FREQ = 70;
+const DEFAULT_MAX_FREQ = 1100;
+const RANGE_PADDING_SEMITONES = 3;
+const MIN_VIEW_SPAN_SEMITONES = 9;
+const VIEW_RANGE_SMOOTHING = 0.2;
 const THEME_STORAGE_KEY = "live-pitch-trace-theme";
 
 const SCALE_INTERVALS = {
@@ -31,6 +37,7 @@ const dom = {
   scaleSettingsGroup: document.getElementById("scale-settings-group"),
   settingsBtn: document.getElementById("settings-btn"),
   settingsPanel: document.getElementById("settings-panel"),
+  difficultySelect: document.getElementById("difficulty-select"),
   waveform: document.getElementById("waveform"),
   noteDurationMs: document.getElementById("note-duration-ms"),
   noteDurationValue: document.getElementById("note-duration-value"),
@@ -41,6 +48,7 @@ const dom = {
   playReferenceBtn: document.getElementById("play-reference-btn"),
   stopReferenceBtn: document.getElementById("stop-reference-btn"),
   themeSelect: document.getElementById("theme-select"),
+  toleranceLabel: document.getElementById("tolerance-label"),
   detectedNote: document.getElementById("detected-note"),
   detectedFrequency: document.getElementById("detected-frequency"),
   tuningStatus: document.getElementById("tuning-status"),
@@ -56,8 +64,10 @@ let analyserNode = null;
 let stream = null;
 let source = null;
 let rafId = null;
+let playbackVizRafId = null;
 let isRunning = false;
 let pitchBuffer = [];
+let referenceBuffer = [];
 let smoothFrequency = null;
 let mutedFrames = 0;
 let freqData = new Float32Array(2048);
@@ -65,6 +75,11 @@ let playbackContext = null;
 let playbackNodes = [];
 let playbackWaiters = [];
 let playbackSessionId = 0;
+let activePlaybackFrequency = null;
+let referenceSignalHistory = [];
+let viewMinFreq = NaN;
+let viewMaxFreq = NaN;
+let inTuneCentsThreshold = DEFAULT_IN_TUNE_CENTS;
 
 function initTargetNotes() {
   const singleNoteOptions = [];
@@ -275,7 +290,8 @@ function getCanvasPalette() {
     text: getThemeColor("--grid-text", "#3c5764"),
     target: getThemeColor("--target", "#1e6fbb"),
     good: getThemeColor("--good", "#0f9d58"),
-    bad: getThemeColor("--bad", "#cf3f3f")
+    bad: getThemeColor("--bad", "#cf3f3f"),
+    reference: getThemeColor("--reference-trace", "#f29e26")
   };
 }
 
@@ -342,7 +358,7 @@ function drawTrace(targets, minFreq, maxFreq, palette) {
     const y1 = frequencyToY(curr, minFreq, maxFreq);
     const nearest = nearestTargetFrequency(curr, targets);
     const cents = nearest ? Math.abs(1200 * Math.log2(curr / nearest)) : 1000;
-    ctx.strokeStyle = cents <= IN_TUNE_CENTS ? palette.good : palette.bad;
+    ctx.strokeStyle = cents <= inTuneCentsThreshold ? palette.good : palette.bad;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
@@ -350,19 +366,131 @@ function drawTrace(targets, minFreq, maxFreq, palette) {
   }
 }
 
-function renderFrame(currentFreq) {
+function drawReferenceTrace(minFreq, maxFreq, palette) {
+  if (referenceBuffer.length < 2) {
+    return;
+  }
+
+  const xStep = CANVAS_WIDTH / (TRACE_POINTS - 1);
+  ctx.lineWidth = 2.3;
+  ctx.strokeStyle = palette.reference;
+
+  for (let i = 1; i < referenceBuffer.length; i += 1) {
+    const prev = referenceBuffer[i - 1];
+    const curr = referenceBuffer[i];
+    if (!Number.isFinite(prev) || !Number.isFinite(curr)) {
+      continue;
+    }
+
+    const x0 = (i - 1) * xStep;
+    const x1 = i * xStep;
+    const y0 = frequencyToY(prev, minFreq, maxFreq);
+    const y1 = frequencyToY(curr, minFreq, maxFreq);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+}
+
+function getSynchronizedReferenceFrequency(referenceFreq) {
+  const now = performance.now();
+  referenceSignalHistory.push({
+    t: now,
+    f: Number.isFinite(referenceFreq) ? referenceFreq : NaN
+  });
+
+  const trimBefore = now - 5000;
+  while (referenceSignalHistory.length > 1 && referenceSignalHistory[1].t < trimBefore) {
+    referenceSignalHistory.shift();
+  }
+
+  const targetTime = now - REFERENCE_SYNC_DELAY_MS;
+  for (let i = referenceSignalHistory.length - 1; i >= 0; i -= 1) {
+    if (referenceSignalHistory[i].t <= targetTime) {
+      return referenceSignalHistory[i].f;
+    }
+  }
+
+  return referenceSignalHistory.length ? referenceSignalHistory[0].f : NaN;
+}
+
+function resetViewRange() {
+  viewMinFreq = NaN;
+  viewMaxFreq = NaN;
+}
+
+function computeTargetViewRange(targets) {
+  if (!targets.length) {
+    return {
+      min: DEFAULT_MIN_FREQ,
+      max: DEFAULT_MAX_FREQ
+    };
+  }
+
+  const minTarget = Math.min(...targets);
+  const maxTarget = Math.max(...targets);
+  const paddingRatio = Math.pow(2, RANGE_PADDING_SEMITONES / 12);
+  let min = minTarget / paddingRatio;
+  let max = maxTarget * paddingRatio;
+
+  const minSpanRatio = Math.pow(2, MIN_VIEW_SPAN_SEMITONES / 12);
+  const currentSpanRatio = max / min;
+  if (currentSpanRatio < minSpanRatio) {
+    const centerFreq = Math.sqrt(min * max);
+    const halfSpan = Math.sqrt(minSpanRatio);
+    min = centerFreq / halfSpan;
+    max = centerFreq * halfSpan;
+  }
+
+  min = Math.max(40, min);
+  max = Math.min(2200, max);
+  if (max <= min * 1.01) {
+    max = min * 1.01;
+  }
+
+  return { min, max };
+}
+
+function getViewRange(targets) {
+  const targetRange = computeTargetViewRange(targets);
+  if (!Number.isFinite(viewMinFreq) || !Number.isFinite(viewMaxFreq)) {
+    viewMinFreq = targetRange.min;
+    viewMaxFreq = targetRange.max;
+    return {
+      min: viewMinFreq,
+      max: viewMaxFreq
+    };
+  }
+
+  viewMinFreq += (targetRange.min - viewMinFreq) * VIEW_RANGE_SMOOTHING;
+  viewMaxFreq += (targetRange.max - viewMaxFreq) * VIEW_RANGE_SMOOTHING;
+  return {
+    min: viewMinFreq,
+    max: viewMaxFreq
+  };
+}
+
+function renderFrame(currentFreq, referenceFreq = activePlaybackFrequency) {
   const targets = getTargetFrequencies();
-  const minFreq = 70;
-  const maxFreq = 1100;
+  const viewRange = getViewRange(targets);
+  const minFreq = viewRange.min;
+  const maxFreq = viewRange.max;
   const palette = getCanvasPalette();
 
   if (pitchBuffer.length >= TRACE_POINTS) {
     pitchBuffer.shift();
   }
   pitchBuffer.push(Number.isFinite(currentFreq) ? currentFreq : NaN);
+  const syncedReferenceFreq = getSynchronizedReferenceFrequency(referenceFreq);
+  if (referenceBuffer.length >= TRACE_POINTS) {
+    referenceBuffer.shift();
+  }
+  referenceBuffer.push(Number.isFinite(syncedReferenceFreq) ? syncedReferenceFreq : NaN);
 
   drawGrid(minFreq, maxFreq, palette);
   drawTargets(targets, minFreq, maxFreq, palette);
+  drawReferenceTrace(minFreq, maxFreq, palette);
   drawTrace(targets, minFreq, maxFreq, palette);
 }
 
@@ -393,7 +521,7 @@ function updateStatus(freq) {
 
   const centsOff = 1200 * Math.log2(freq / nearest);
   const absCents = Math.abs(centsOff);
-  if (absCents <= IN_TUNE_CENTS) {
+  if (absCents <= inTuneCentsThreshold) {
     dom.tuningStatus.textContent = `In tune (${centsOff >= 0 ? "+" : ""}${centsOff.toFixed(1)}c)`;
     dom.tuningStatus.style.color = "#0f9d58";
   } else if (centsOff > 0) {
@@ -435,6 +563,39 @@ function setControlsRunning(running) {
   dom.scaleTonic.disabled = running;
   dom.scaleType.disabled = running;
   dom.loopScale.disabled = running;
+}
+
+function updateDifficultyFromSelection() {
+  const parsed = clampNumber(dom.difficultySelect.value, 5, 80, DEFAULT_IN_TUNE_CENTS);
+  inTuneCentsThreshold = Math.round(parsed);
+  dom.difficultySelect.value = String(inTuneCentsThreshold);
+  dom.toleranceLabel.textContent = String(inTuneCentsThreshold);
+}
+
+function startPlaybackVisualizationLoop() {
+  if (isRunning || playbackVizRafId) {
+    return;
+  }
+
+  const tick = () => {
+    if (isRunning) {
+      playbackVizRafId = null;
+      return;
+    }
+
+    renderFrame(smoothFrequency);
+    const shouldContinue =
+      Number.isFinite(activePlaybackFrequency) ||
+      playbackNodes.length > 0 ||
+      playbackWaiters.length > 0;
+    if (shouldContinue) {
+      playbackVizRafId = window.requestAnimationFrame(tick);
+    } else {
+      playbackVizRafId = null;
+    }
+  };
+
+  playbackVizRafId = window.requestAnimationFrame(tick);
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -529,6 +690,8 @@ function fadeOutAndStopTone(node, releaseSeconds = 0.03) {
 
 function stopReferencePlayback() {
   playbackSessionId += 1;
+  activePlaybackFrequency = null;
+  referenceSignalHistory = [];
   playbackWaiters.forEach((waiter) => {
     window.clearTimeout(waiter.id);
     waiter.resolve(false);
@@ -550,6 +713,7 @@ function stopReferencePlayback() {
   });
   playbackNodes = [];
   dom.stopReferenceBtn.disabled = true;
+  renderFrame(smoothFrequency);
 }
 
 function createReferenceTone(context, frequency, gainValue = 0.1, waveType = "sine") {
@@ -591,6 +755,8 @@ async function playScaleSequence(context, targets, sessionId, waveType, loopScal
         return;
       }
 
+      activePlaybackFrequency = freq;
+      startPlaybackVisualizationLoop();
       const node = createReferenceTone(context, freq, 0.09, waveType);
       const playedFullNote = await waitForPlayback(noteDurationMs);
       if (sessionId !== playbackSessionId || !playedFullNote) {
@@ -598,6 +764,7 @@ async function playScaleSequence(context, targets, sessionId, waveType, loopScal
       }
 
       fadeOutAndStopTone(node, 0.02);
+      activePlaybackFrequency = null;
       const playedGap = await waitForPlayback(gapDurationMs);
       if (sessionId !== playbackSessionId || !playedGap) {
         return;
@@ -606,6 +773,7 @@ async function playScaleSequence(context, targets, sessionId, waveType, loopScal
   } while (loopScale && sessionId === playbackSessionId);
 
   if (sessionId === playbackSessionId) {
+    activePlaybackFrequency = null;
     dom.stopReferenceBtn.disabled = true;
   }
 }
@@ -613,6 +781,7 @@ async function playScaleSequence(context, targets, sessionId, waveType, loopScal
 async function playReference() {
   stopReferencePlayback();
   const sessionId = playbackSessionId;
+  referenceSignalHistory = [];
 
   const context = await ensurePlaybackContext();
   if (sessionId !== playbackSessionId) {
@@ -624,8 +793,10 @@ async function playReference() {
     if (!Number.isFinite(freq)) {
       return;
     }
+    activePlaybackFrequency = freq;
     createReferenceTone(context, freq, 0.1, dom.waveform.value);
     dom.stopReferenceBtn.disabled = false;
+    startPlaybackVisualizationLoop();
     return;
   }
 
@@ -713,6 +884,9 @@ async function startMonitoring() {
   source.connect(analyserNode);
 
   pitchBuffer = [];
+  referenceBuffer = [];
+  referenceSignalHistory = [];
+  resetViewRange();
   smoothFrequency = null;
   mutedFrames = 0;
   isRunning = true;
@@ -756,6 +930,7 @@ function stopMonitoring() {
 
 function updateModeUi() {
   stopReferencePlayback();
+  resetViewRange();
   const mode = dom.mode.value;
   if (mode === "single") {
     dom.singleGroup.classList.remove("hidden");
@@ -776,19 +951,23 @@ function updateModeUi() {
 function boot() {
   initTargetNotes();
   initTheme();
+  updateDifficultyFromSelection();
   updateScaleSettingOutputs();
   renderFrame(null);
   dom.mode.addEventListener("change", updateModeUi);
   dom.targetNote.addEventListener("change", () => {
     stopReferencePlayback();
+    resetViewRange();
     renderFrame(smoothFrequency);
   });
   dom.scaleTonic.addEventListener("change", () => {
     stopReferencePlayback();
+    resetViewRange();
     renderFrame(smoothFrequency);
   });
   dom.scaleType.addEventListener("change", () => {
     stopReferencePlayback();
+    resetViewRange();
     renderFrame(smoothFrequency);
   });
   dom.waveform.addEventListener("change", stopReferencePlayback);
@@ -805,6 +984,10 @@ function boot() {
   dom.stopBtn.addEventListener("click", stopMonitoring);
   dom.playReferenceBtn.addEventListener("click", playReference);
   dom.stopReferenceBtn.addEventListener("click", stopReferencePlayback);
+  dom.difficultySelect.addEventListener("change", () => {
+    updateDifficultyFromSelection();
+    renderFrame(smoothFrequency);
+  });
   dom.themeSelect.addEventListener("change", () => setThemeMode(dom.themeSelect.value));
   dom.settingsBtn.addEventListener("click", toggleSettingsPanel);
   dom.settingsPanel.addEventListener("click", (event) => event.stopPropagation());

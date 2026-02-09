@@ -15,6 +15,7 @@
   --button-secondary-ink: #0f3443;
   --good: #0f9d58;
   --bad: #cf3f3f;
+  --reference-trace: #f29e26;
   --target: #1e6fbb;
   --grid-fill: #f8fbfd;
   --grid-line: #d8e5ed;
@@ -39,6 +40,7 @@ body.dark {
   --button-secondary-ink: #d7e8f1;
   --good: #38c878;
   --bad: #ff6b6b;
+  --reference-trace: #ffbf4d;
   --target: #63b0ff;
   --grid-fill: #10202c;
   --grid-line: #1f3a4b;
@@ -82,25 +84,9 @@ body {
   gap: 1rem;
 }
 
-.theme-compact {
-  display: grid;
-  gap: 0.2rem;
-  justify-items: end;
-}
-
-.theme-compact label {
-  font-size: 0.72rem;
-  color: var(--ink-1);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.theme-compact select {
-  min-height: 1.9rem;
-  width: 110px;
-  font-size: 0.85rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 7px;
+.header-settings {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .subtitle {
@@ -187,16 +173,31 @@ button:disabled {
   text-align: left;
 }
 
+.settings-corner-btn {
+  width: auto;
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.84rem;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.settings-corner-label {
+  line-height: 1;
+}
+
 .settings-glyph {
-  margin-right: 0.2rem;
+  margin-right: 0;
 }
 
 .settings-panel {
   position: absolute;
   z-index: 20;
   top: calc(100% + 0.45rem);
-  left: 0;
-  width: min(300px, 85vw);
+  right: 0;
+  width: min(340px, 90vw);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.7rem;
@@ -296,12 +297,7 @@ canvas {
 
 @media (max-width: 700px) {
   .header-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .theme-compact {
-    justify-items: start;
+    align-items: center;
   }
 
   .status-panel {

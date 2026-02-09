@@ -16,14 +16,16 @@ Live Pitch Trace is a browser app that monitors microphone input and visualizes 
 - Reference playback:
   - `Single Note`: sustained tone until stopped
   - `Scale`: ascending scale playback, with optional loop
-- Settings popup (`Settings`) for:
+- Settings popup (top-right `Settings` button) for:
+  - theme (`System`, `Light`, `Dark`)
+  - difficulty (`Easy`, `Standard`, `Hard`, `Expert`) which controls in-tune cents tolerance
   - reference waveform (`sine`, `triangle`, `square`, `sawtooth`)
   - scale note duration slider (shown only in `Scale` mode)
   - scale note gap slider (shown only in `Scale` mode)
-- Subtle top-right `Theme` selector (`System`, `Light`, `Dark`) with saved preference.
 - In-tune feedback based on cents difference:
-  - Green trace and status when within `25 cents`
+  - Green trace and status when within the selected difficulty tolerance
   - Red trace and status when out of tune
+- Orange trace line shows active reference playback notes.
 
 ## Run
 
@@ -49,7 +51,7 @@ Then open the local URL (for example `http://localhost:3000`).
 
 1. Choose `Target Mode`.
 2. Select a target note (Single mode) or choose `Scale Tonic` + `Scale Type` (Scale mode).
-3. Optional: open `Settings` and set waveform.
+3. Optional: open top-right `Settings` and set theme, difficulty, and waveform.
 4. In `Scale` mode, adjust duration/gap sliders in `Settings`.
 5. Optional in `Scale` mode: enable `Loop Scale Playback`.
 6. Optional: click `Play Reference` to hear the selected note or scale.
@@ -59,5 +61,4 @@ Then open the local URL (for example `http://localhost:3000`).
    - `Detected` note/frequency
    - `Tuning` state (`In tune`, `Sharp`, `Flat`)
    - Scrolling trace against dashed target lines
-10. Use the top-right theme selector any time.
-11. Click `Stop` to end monitoring.
+10. Click `Stop` to end monitoring.

@@ -11,35 +11,32 @@
     <header class="app-header">
       <div class="header-row">
         <h1>Live Pitch Trace</h1>
-        <div class="theme-compact">
-          <label for="theme-select">Theme</label>
-          <select id="theme-select" aria-label="Theme">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </div>
-      </div>
-      <p class="subtitle">Track your singing pitch against a target note or scale in real time.</p>
-    </header>
-
-    <section class="controls" aria-label="Pitch controls">
-      <div class="controls-grid">
-        <div class="control-group">
-          <label for="mode">Target Mode</label>
-          <select id="mode">
-            <option value="single">Single Note</option>
-            <option value="scale">Scale</option>
-          </select>
-        </div>
-
-        <div class="control-group">
-          <label for="settings-btn">Playback Settings</label>
-          <div class="settings-wrap">
-            <button id="settings-btn" type="button" class="secondary-btn settings-btn" aria-expanded="false" aria-controls="settings-panel">
-              <span class="settings-glyph" aria-hidden="true">&#9881;</span> Settings
+        <div class="header-settings">
+          <div class="settings-wrap header-settings-wrap">
+            <button id="settings-btn" type="button" class="secondary-btn settings-btn settings-corner-btn" aria-expanded="false" aria-controls="settings-panel" aria-label="Open settings">
+              <span class="settings-glyph" aria-hidden="true">&#9881;</span>
+              <span class="settings-corner-label">Settings</span>
             </button>
             <div id="settings-panel" class="settings-panel hidden" role="dialog" aria-label="Playback settings">
+              <div class="control-group">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select" aria-label="Theme">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+
+              <div class="control-group">
+                <label for="difficulty-select">Difficulty (In-Tune Window)</label>
+                <select id="difficulty-select" aria-label="Difficulty">
+                  <option value="40">Easy (+/-40 cents)</option>
+                  <option value="25" selected>Standard (+/-25 cents)</option>
+                  <option value="15">Hard (+/-15 cents)</option>
+                  <option value="8">Expert (+/-8 cents)</option>
+                </select>
+              </div>
+
               <div class="control-group">
                 <label for="waveform">Reference Waveform</label>
                 <select id="waveform">
@@ -69,6 +66,19 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+      <p class="subtitle">Track your singing pitch against a target note or scale in real time.</p>
+    </header>
+
+    <section class="controls" aria-label="Pitch controls">
+      <div class="controls-grid">
+        <div class="control-group">
+          <label for="mode">Target Mode</label>
+          <select id="mode">
+            <option value="single">Single Note</option>
+            <option value="scale">Scale</option>
+          </select>
         </div>
 
         <div class="control-group" id="single-note-group">
@@ -127,7 +137,7 @@
 
     <section class="viz-panel">
       <canvas id="pitch-canvas" width="1320" height="560" aria-label="Live pitch trace"></canvas>
-      <p class="hint">Green trace means in tune (within 25 cents). Red means out of tune.</p>
+      <p class="hint">Green trace means in tune (within <span id="tolerance-label">25</span> cents). Red means out of tune. Orange shows reference playback.</p>
     </section>
   </main>
 
