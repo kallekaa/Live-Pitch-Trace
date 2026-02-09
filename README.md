@@ -6,9 +6,21 @@ Live Pitch Trace is a browser app that monitors microphone input and visualizes 
 
 - Real-time microphone pitch detection in the vocal range.
 - Scrolling pitch trace that updates continuously while you sing.
+- Wider horizontal graph for easier phrase-level pitch tracking.
+- Taller visualization area for better vertical pitch spacing.
 - Target modes:
   - `Single Note` (choose any note from C2 to B6)
-  - `Scale` (common major/minor/pentatonic options)
+  - `Scale` with separate selectors for:
+    - `Scale Tonic` (starting note like C2, C3, F#3, etc.)
+    - `Scale Type` (Major, Minor variants, Pentatonic, Blues)
+- Reference playback:
+  - `Single Note`: sustained tone until stopped
+  - `Scale`: ascending scale playback, with optional loop
+- Settings popup (`Settings`) for:
+  - reference waveform (`sine`, `triangle`, `square`, `sawtooth`)
+  - scale note duration slider (shown only in `Scale` mode)
+  - scale note gap slider (shown only in `Scale` mode)
+- Subtle top-right `Theme` selector (`System`, `Light`, `Dark`) with saved preference.
 - In-tune feedback based on cents difference:
   - Green trace and status when within `25 cents`
   - Red trace and status when out of tune
@@ -36,10 +48,16 @@ Then open the local URL (for example `http://localhost:3000`).
 ## Usage
 
 1. Choose `Target Mode`.
-2. Select a target note or scale.
-3. Click `Start Monitoring` and allow microphone access.
-4. Sing and watch:
+2. Select a target note (Single mode) or choose `Scale Tonic` + `Scale Type` (Scale mode).
+3. Optional: open `Settings` and set waveform.
+4. In `Scale` mode, adjust duration/gap sliders in `Settings`.
+5. Optional in `Scale` mode: enable `Loop Scale Playback`.
+6. Optional: click `Play Reference` to hear the selected note or scale.
+7. Click `Stop Tone` to stop reference playback at any time.
+8. Click `Start Monitoring` and allow microphone access.
+9. Sing and watch:
    - `Detected` note/frequency
    - `Tuning` state (`In tune`, `Sharp`, `Flat`)
    - Scrolling trace against dashed target lines
-5. Click `Stop` to end monitoring.
+10. Use the top-right theme selector any time.
+11. Click `Stop` to end monitoring.

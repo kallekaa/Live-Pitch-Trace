@@ -2,28 +2,45 @@
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const A4_FREQ = 440;
-const CANVAS_WIDTH = 1120;
-const CANVAS_HEIGHT = 460;
-const TRACE_POINTS = 700;
+const CANVAS_WIDTH = 1320;
+const CANVAS_HEIGHT = 560;
+const TRACE_POINTS = 820;
 const IN_TUNE_CENTS = 25;
+const THEME_STORAGE_KEY = "live-pitch-trace-theme";
 
-const SCALE_DEFINITIONS = {
-  C_major: ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"],
-  G_major: ["G2", "A2", "B2", "C3", "D3", "E3", "F#3", "G3", "A3", "B3", "C4", "D4", "E4", "F#4", "G4"],
-  D_major: ["D3", "E3", "F#3", "G3", "A3", "B3", "C#4", "D4", "E4", "F#4", "G4", "A4", "B4", "C#5", "D5"],
-  A_minor: ["A2", "B2", "C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4", "D4", "E4", "F4", "G4", "A4"],
-  E_minor: ["E2", "F#2", "G2", "A2", "B2", "C3", "D3", "E3", "F#3", "G3", "A3", "B3", "C4", "D4", "E4"],
-  Pentatonic_C: ["C3", "D3", "E3", "G3", "A3", "C4", "D4", "E4", "G4", "A4", "C5"]
+const SCALE_INTERVALS = {
+  major: [0, 2, 4, 5, 7, 9, 11, 12],
+  natural_minor: [0, 2, 3, 5, 7, 8, 10, 12],
+  harmonic_minor: [0, 2, 3, 5, 7, 8, 11, 12],
+  melodic_minor: [0, 2, 3, 5, 7, 9, 11, 12],
+  major_pentatonic: [0, 2, 4, 7, 9, 12],
+  minor_pentatonic: [0, 3, 5, 7, 10, 12],
+  blues: [0, 3, 5, 6, 7, 10, 12]
 };
 
 const dom = {
   mode: document.getElementById("mode"),
   targetNote: document.getElementById("target-note"),
-  targetScale: document.getElementById("target-scale"),
+  scaleTonic: document.getElementById("scale-tonic"),
+  scaleType: document.getElementById("scale-type"),
   singleGroup: document.getElementById("single-note-group"),
-  scaleGroup: document.getElementById("scale-group"),
+  scaleTonicGroup: document.getElementById("scale-tonic-group"),
+  scaleTypeGroup: document.getElementById("scale-type-group"),
+  scaleLoopGroup: document.getElementById("scale-loop-group"),
+  loopScale: document.getElementById("loop-scale"),
+  scaleSettingsGroup: document.getElementById("scale-settings-group"),
+  settingsBtn: document.getElementById("settings-btn"),
+  settingsPanel: document.getElementById("settings-panel"),
+  waveform: document.getElementById("waveform"),
+  noteDurationMs: document.getElementById("note-duration-ms"),
+  noteDurationValue: document.getElementById("note-duration-value"),
+  noteGapMs: document.getElementById("note-gap-ms"),
+  noteGapValue: document.getElementById("note-gap-value"),
   startBtn: document.getElementById("start-btn"),
   stopBtn: document.getElementById("stop-btn"),
+  playReferenceBtn: document.getElementById("play-reference-btn"),
+  stopReferenceBtn: document.getElementById("stop-reference-btn"),
+  themeSelect: document.getElementById("theme-select"),
   detectedNote: document.getElementById("detected-note"),
   detectedFrequency: document.getElementById("detected-frequency"),
   tuningStatus: document.getElementById("tuning-status"),
@@ -44,25 +61,43 @@ let pitchBuffer = [];
 let smoothFrequency = null;
 let mutedFrames = 0;
 let freqData = new Float32Array(2048);
+let playbackContext = null;
+let playbackNodes = [];
+let playbackWaiters = [];
+let playbackSessionId = 0;
 
 function initTargetNotes() {
-  const noteOptions = [];
+  const singleNoteOptions = [];
+  const scaleTonicOptions = [];
+
   for (let octave = 2; octave <= 6; octave += 1) {
     for (const name of NOTE_NAMES) {
-      noteOptions.push(`${name}${octave}`);
+      const noteLabel = `${name}${octave}`;
+      singleNoteOptions.push(noteLabel);
+      if (octave <= 5) {
+        scaleTonicOptions.push(noteLabel);
+      }
     }
   }
 
-  noteOptions.forEach((label) => {
+  singleNoteOptions.forEach((label) => {
     const option = document.createElement("option");
     option.value = label;
     option.textContent = label;
     dom.targetNote.appendChild(option);
   });
   dom.targetNote.value = "A4";
+
+  scaleTonicOptions.forEach((label) => {
+    const option = document.createElement("option");
+    option.value = label;
+    option.textContent = label;
+    dom.scaleTonic.appendChild(option);
+  });
+  dom.scaleTonic.value = "C3";
 }
 
-function noteToFrequency(noteName) {
+function noteNameToMidi(noteName) {
   const match = /^([A-G]#?)(\d)$/.exec(noteName);
   if (!match) {
     return null;
@@ -75,8 +110,19 @@ function noteToFrequency(noteName) {
     return null;
   }
 
-  const midi = noteIndex + (octave + 1) * 12;
+  return noteIndex + (octave + 1) * 12;
+}
+
+function midiToFrequency(midi) {
   return A4_FREQ * Math.pow(2, (midi - 69) / 12);
+}
+
+function noteToFrequency(noteName) {
+  const midi = noteNameToMidi(noteName);
+  if (!Number.isFinite(midi)) {
+    return null;
+  }
+  return midiToFrequency(midi);
 }
 
 function frequencyToNote(frequency) {
@@ -172,14 +218,24 @@ function autoCorrelate(buffer, sampleRate) {
   return frequency;
 }
 
+function buildScaleFrequencies() {
+  const tonicMidi = noteNameToMidi(dom.scaleTonic.value);
+  const intervals = SCALE_INTERVALS[dom.scaleType.value] || SCALE_INTERVALS.major;
+  if (!Number.isFinite(tonicMidi)) {
+    return [];
+  }
+
+  return intervals
+    .map((interval) => midiToFrequency(tonicMidi + interval))
+    .filter((freq) => Number.isFinite(freq) && freq > 0);
+}
+
 function getTargetFrequencies() {
   if (dom.mode.value === "single") {
     const freq = noteToFrequency(dom.targetNote.value);
     return freq ? [freq] : [];
   }
-
-  const scale = SCALE_DEFINITIONS[dom.targetScale.value] || [];
-  return scale.map(noteToFrequency).filter((freq) => Number.isFinite(freq));
+  return buildScaleFrequencies();
 }
 
 function nearestTargetFrequency(freq, targets) {
@@ -207,11 +263,27 @@ function frequencyToY(freq, minFreq, maxFreq) {
   return CANVAS_HEIGHT - norm * CANVAS_HEIGHT;
 }
 
-function drawGrid(minFreq, maxFreq) {
-  ctx.fillStyle = "#f8fbfd";
+function getThemeColor(name, fallback) {
+  const value = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function getCanvasPalette() {
+  return {
+    fill: getThemeColor("--grid-fill", "#f8fbfd"),
+    line: getThemeColor("--grid-line", "#d8e5ed"),
+    text: getThemeColor("--grid-text", "#3c5764"),
+    target: getThemeColor("--target", "#1e6fbb"),
+    good: getThemeColor("--good", "#0f9d58"),
+    bad: getThemeColor("--bad", "#cf3f3f")
+  };
+}
+
+function drawGrid(minFreq, maxFreq, palette) {
+  ctx.fillStyle = palette.fill;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  ctx.strokeStyle = "#d8e5ed";
+  ctx.strokeStyle = palette.line;
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i <= 12; i += 1) {
@@ -226,7 +298,7 @@ function drawGrid(minFreq, maxFreq) {
   }
   ctx.stroke();
 
-  ctx.fillStyle = "#3c5764";
+  ctx.fillStyle = palette.text;
   ctx.font = "12px Segoe UI";
   const lowNote = frequencyToNote(minFreq).name;
   const highNote = frequencyToNote(maxFreq).name;
@@ -235,8 +307,8 @@ function drawGrid(minFreq, maxFreq) {
   ctx.fillText(`High: ${highNote}`, CANVAS_WIDTH - textWidth - 10, 16);
 }
 
-function drawTargets(targets, minFreq, maxFreq) {
-  ctx.strokeStyle = "rgba(30, 111, 187, 0.65)";
+function drawTargets(targets, minFreq, maxFreq, palette) {
+  ctx.strokeStyle = palette.target;
   ctx.lineWidth = 1.8;
   ctx.setLineDash([7, 5]);
   targets.forEach((targetFreq) => {
@@ -249,7 +321,7 @@ function drawTargets(targets, minFreq, maxFreq) {
   ctx.setLineDash([]);
 }
 
-function drawTrace(targets, minFreq, maxFreq) {
+function drawTrace(targets, minFreq, maxFreq, palette) {
   if (pitchBuffer.length < 2) {
     return;
   }
@@ -270,7 +342,7 @@ function drawTrace(targets, minFreq, maxFreq) {
     const y1 = frequencyToY(curr, minFreq, maxFreq);
     const nearest = nearestTargetFrequency(curr, targets);
     const cents = nearest ? Math.abs(1200 * Math.log2(curr / nearest)) : 1000;
-    ctx.strokeStyle = cents <= IN_TUNE_CENTS ? "#0f9d58" : "#cf3f3f";
+    ctx.strokeStyle = cents <= IN_TUNE_CENTS ? palette.good : palette.bad;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
@@ -282,15 +354,16 @@ function renderFrame(currentFreq) {
   const targets = getTargetFrequencies();
   const minFreq = 70;
   const maxFreq = 1100;
+  const palette = getCanvasPalette();
 
   if (pitchBuffer.length >= TRACE_POINTS) {
     pitchBuffer.shift();
   }
   pitchBuffer.push(Number.isFinite(currentFreq) ? currentFreq : NaN);
 
-  drawGrid(minFreq, maxFreq);
-  drawTargets(targets, minFreq, maxFreq);
-  drawTrace(targets, minFreq, maxFreq);
+  drawGrid(minFreq, maxFreq, palette);
+  drawTargets(targets, minFreq, maxFreq, palette);
+  drawTrace(targets, minFreq, maxFreq, palette);
 }
 
 function updateStatus(freq) {
@@ -359,7 +432,257 @@ function setControlsRunning(running) {
   dom.stopBtn.disabled = !running;
   dom.mode.disabled = running;
   dom.targetNote.disabled = running;
-  dom.targetScale.disabled = running;
+  dom.scaleTonic.disabled = running;
+  dom.scaleType.disabled = running;
+  dom.loopScale.disabled = running;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function updateScaleSettingOutputs() {
+  dom.noteDurationValue.textContent = `${dom.noteDurationMs.value} ms`;
+  dom.noteGapValue.textContent = `${dom.noteGapMs.value} ms`;
+}
+
+function getScalePlaybackTiming() {
+  const noteDurationMs = clampNumber(dom.noteDurationMs.value, 140, 900, 320);
+  const noteGapMs = clampNumber(dom.noteGapMs.value, 0, 300, 55);
+  dom.noteDurationMs.value = String(Math.round(noteDurationMs));
+  dom.noteGapMs.value = String(Math.round(noteGapMs));
+  updateScaleSettingOutputs();
+  return {
+    noteDurationMs: Math.round(noteDurationMs),
+    noteGapMs: Math.round(noteGapMs)
+  };
+}
+
+async function ensurePlaybackContext() {
+  if (!playbackContext || playbackContext.state === "closed") {
+    playbackContext = new window.AudioContext();
+  }
+
+  if (playbackContext.state !== "running") {
+    try {
+      await playbackContext.resume();
+    } catch (_error) {
+      // Ignore and try fallback context creation below.
+    }
+  }
+
+  if (playbackContext.state !== "running") {
+    playbackContext = new window.AudioContext();
+    if (playbackContext.state !== "running") {
+      try {
+        await playbackContext.resume();
+      } catch (_error) {
+        // Keep as-is; caller will effectively no-op if audio output is blocked.
+      }
+    }
+  }
+
+  return playbackContext;
+}
+
+function removePlaybackNode(node) {
+  playbackNodes = playbackNodes.filter((entry) => entry !== node);
+  if (playbackNodes.length === 0 && playbackWaiters.length === 0) {
+    dom.stopReferenceBtn.disabled = true;
+  }
+}
+
+function waitForPlayback(ms) {
+  return new Promise((resolve) => {
+    const waiter = {
+      id: 0,
+      resolve
+    };
+
+    waiter.id = window.setTimeout(() => {
+      playbackWaiters = playbackWaiters.filter((entry) => entry !== waiter);
+      resolve(true);
+      if (playbackNodes.length === 0 && playbackWaiters.length === 0) {
+        dom.stopReferenceBtn.disabled = true;
+      }
+    }, ms);
+
+    playbackWaiters.push(waiter);
+  });
+}
+
+function fadeOutAndStopTone(node, releaseSeconds = 0.03) {
+  const now = node.context.currentTime;
+  try {
+    node.gain.gain.cancelScheduledValues(now);
+    node.gain.gain.setValueAtTime(Math.max(node.gain.gain.value, 0.0001), now);
+    node.gain.gain.linearRampToValueAtTime(0.0001, now + releaseSeconds);
+    node.osc.stop(now + releaseSeconds + 0.005);
+  } catch (_error) {
+    // Ignore if node is already stopped.
+  }
+}
+
+function stopReferencePlayback() {
+  playbackSessionId += 1;
+  playbackWaiters.forEach((waiter) => {
+    window.clearTimeout(waiter.id);
+    waiter.resolve(false);
+  });
+  playbackWaiters = [];
+  playbackNodes.forEach((node) => {
+    try {
+      node.osc.onended = null;
+      fadeOutAndStopTone(node, 0.015);
+    } catch (_error) {
+      // Ignore if oscillator has already stopped.
+    }
+    try {
+      node.osc.disconnect();
+      node.gain.disconnect();
+    } catch (_error) {
+      // Ignore disconnect errors.
+    }
+  });
+  playbackNodes = [];
+  dom.stopReferenceBtn.disabled = true;
+}
+
+function createReferenceTone(context, frequency, gainValue = 0.1, waveType = "sine") {
+  const startTime = context.currentTime + 0.002;
+  const osc = context.createOscillator();
+  const gain = context.createGain();
+  osc.type = waveType;
+  osc.frequency.setValueAtTime(frequency, startTime);
+
+  gain.gain.setValueAtTime(0.0001, Math.max(0, startTime - 0.01));
+  gain.gain.linearRampToValueAtTime(gainValue, startTime + 0.02);
+
+  osc.connect(gain);
+  gain.connect(context.destination);
+  osc.start(startTime);
+  const nodeRef = { osc, gain, context };
+  osc.onended = () => {
+    try {
+      osc.disconnect();
+      gain.disconnect();
+    } catch (_error) {
+      // Ignore disconnect errors.
+    }
+    removePlaybackNode(nodeRef);
+  };
+  playbackNodes.push(nodeRef);
+
+  return nodeRef;
+}
+
+async function playScaleSequence(context, targets, sessionId, waveType, loopScale) {
+  const timing = getScalePlaybackTiming();
+  const noteDurationMs = timing.noteDurationMs;
+  const gapDurationMs = timing.noteGapMs;
+
+  do {
+    for (const freq of targets) {
+      if (sessionId !== playbackSessionId) {
+        return;
+      }
+
+      const node = createReferenceTone(context, freq, 0.09, waveType);
+      const playedFullNote = await waitForPlayback(noteDurationMs);
+      if (sessionId !== playbackSessionId || !playedFullNote) {
+        return;
+      }
+
+      fadeOutAndStopTone(node, 0.02);
+      const playedGap = await waitForPlayback(gapDurationMs);
+      if (sessionId !== playbackSessionId || !playedGap) {
+        return;
+      }
+    }
+  } while (loopScale && sessionId === playbackSessionId);
+
+  if (sessionId === playbackSessionId) {
+    dom.stopReferenceBtn.disabled = true;
+  }
+}
+
+async function playReference() {
+  stopReferencePlayback();
+  const sessionId = playbackSessionId;
+
+  const context = await ensurePlaybackContext();
+  if (sessionId !== playbackSessionId) {
+    return;
+  }
+
+  if (dom.mode.value === "single") {
+    const freq = noteToFrequency(dom.targetNote.value);
+    if (!Number.isFinite(freq)) {
+      return;
+    }
+    createReferenceTone(context, freq, 0.1, dom.waveform.value);
+    dom.stopReferenceBtn.disabled = false;
+    return;
+  }
+
+  const targets = getTargetFrequencies();
+  if (!targets.length) {
+    return;
+  }
+  dom.stopReferenceBtn.disabled = false;
+  playScaleSequence(context, targets, sessionId, dom.waveform.value, dom.loopScale.checked);
+}
+
+function closeSettingsPanel() {
+  dom.settingsPanel.classList.add("hidden");
+  dom.settingsBtn.setAttribute("aria-expanded", "false");
+}
+
+function openSettingsPanel() {
+  dom.settingsPanel.classList.remove("hidden");
+  dom.settingsBtn.setAttribute("aria-expanded", "true");
+}
+
+function toggleSettingsPanel() {
+  const isHidden = dom.settingsPanel.classList.contains("hidden");
+  if (isHidden) {
+    openSettingsPanel();
+  } else {
+    closeSettingsPanel();
+  }
+}
+
+function resolveThemeMode(mode) {
+  if (mode === "dark" || mode === "light") {
+    return mode;
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function setThemeMode(mode) {
+  const normalizedMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+  const resolved = resolveThemeMode(normalizedMode);
+  document.body.classList.toggle("dark", resolved === "dark");
+  dom.themeSelect.value = normalizedMode;
+  window.localStorage.setItem(THEME_STORAGE_KEY, normalizedMode);
+  renderFrame(smoothFrequency);
+}
+
+function initTheme() {
+  const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const initialMode = saved === "dark" || saved === "light" || saved === "system" ? saved : "system";
+  setThemeMode(initialMode);
+
+  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  mediaQuery.addEventListener("change", () => {
+    if (dom.themeSelect.value === "system") {
+      setThemeMode("system");
+    }
+  });
 }
 
 async function startMonitoring() {
@@ -432,25 +755,77 @@ function stopMonitoring() {
 }
 
 function updateModeUi() {
+  stopReferencePlayback();
   const mode = dom.mode.value;
   if (mode === "single") {
     dom.singleGroup.classList.remove("hidden");
-    dom.scaleGroup.classList.add("hidden");
+    dom.scaleTonicGroup.classList.add("hidden");
+    dom.scaleTypeGroup.classList.add("hidden");
+    dom.scaleLoopGroup.classList.add("hidden");
+    dom.scaleSettingsGroup.classList.add("hidden");
   } else {
     dom.singleGroup.classList.add("hidden");
-    dom.scaleGroup.classList.remove("hidden");
+    dom.scaleTonicGroup.classList.remove("hidden");
+    dom.scaleTypeGroup.classList.remove("hidden");
+    dom.scaleLoopGroup.classList.remove("hidden");
+    dom.scaleSettingsGroup.classList.remove("hidden");
   }
   renderFrame(smoothFrequency);
 }
 
 function boot() {
   initTargetNotes();
+  initTheme();
+  updateScaleSettingOutputs();
   renderFrame(null);
   dom.mode.addEventListener("change", updateModeUi);
-  dom.targetNote.addEventListener("change", () => renderFrame(smoothFrequency));
-  dom.targetScale.addEventListener("change", () => renderFrame(smoothFrequency));
+  dom.targetNote.addEventListener("change", () => {
+    stopReferencePlayback();
+    renderFrame(smoothFrequency);
+  });
+  dom.scaleTonic.addEventListener("change", () => {
+    stopReferencePlayback();
+    renderFrame(smoothFrequency);
+  });
+  dom.scaleType.addEventListener("change", () => {
+    stopReferencePlayback();
+    renderFrame(smoothFrequency);
+  });
+  dom.waveform.addEventListener("change", stopReferencePlayback);
+  dom.noteDurationMs.addEventListener("input", () => {
+    updateScaleSettingOutputs();
+    stopReferencePlayback();
+  });
+  dom.noteGapMs.addEventListener("input", () => {
+    updateScaleSettingOutputs();
+    stopReferencePlayback();
+  });
+  dom.loopScale.addEventListener("change", stopReferencePlayback);
   dom.startBtn.addEventListener("click", startMonitoring);
   dom.stopBtn.addEventListener("click", stopMonitoring);
+  dom.playReferenceBtn.addEventListener("click", playReference);
+  dom.stopReferenceBtn.addEventListener("click", stopReferencePlayback);
+  dom.themeSelect.addEventListener("change", () => setThemeMode(dom.themeSelect.value));
+  dom.settingsBtn.addEventListener("click", toggleSettingsPanel);
+  dom.settingsPanel.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", (event) => {
+    if (dom.settingsPanel.classList.contains("hidden")) {
+      return;
+    }
+    if (event.target === dom.settingsBtn || dom.settingsBtn.contains(event.target)) {
+      return;
+    }
+    if (dom.settingsPanel.contains(event.target)) {
+      return;
+    }
+    closeSettingsPanel();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeSettingsPanel();
+    }
+  });
+  updateModeUi();
 }
 
 boot();

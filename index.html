@@ -9,39 +9,104 @@
 <body>
   <main class="app-shell">
     <header class="app-header">
-      <h1>Live Pitch Trace</h1>
+      <div class="header-row">
+        <h1>Live Pitch Trace</h1>
+        <div class="theme-compact">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select" aria-label="Theme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </div>
       <p class="subtitle">Track your singing pitch against a target note or scale in real time.</p>
     </header>
 
     <section class="controls" aria-label="Pitch controls">
-      <div class="control-group">
-        <label for="mode">Target Mode</label>
-        <select id="mode">
-          <option value="single">Single Note</option>
-          <option value="scale">Scale</option>
-        </select>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label for="mode">Target Mode</label>
+          <select id="mode">
+            <option value="single">Single Note</option>
+            <option value="scale">Scale</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="settings-btn">Playback Settings</label>
+          <div class="settings-wrap">
+            <button id="settings-btn" type="button" class="secondary-btn settings-btn" aria-expanded="false" aria-controls="settings-panel">
+              <span class="settings-glyph" aria-hidden="true">&#9881;</span> Settings
+            </button>
+            <div id="settings-panel" class="settings-panel hidden" role="dialog" aria-label="Playback settings">
+              <div class="control-group">
+                <label for="waveform">Reference Waveform</label>
+                <select id="waveform">
+                  <option value="sine">Sine</option>
+                  <option value="triangle">Triangle</option>
+                  <option value="square">Square</option>
+                  <option value="sawtooth">Sawtooth</option>
+                </select>
+              </div>
+
+              <div id="scale-settings-group" class="control-group hidden">
+                <div class="setting-block">
+                  <div class="setting-label-row">
+                    <label for="note-duration-ms">Scale Note Duration</label>
+                    <output id="note-duration-value" for="note-duration-ms">320 ms</output>
+                  </div>
+                  <input id="note-duration-ms" type="range" min="140" max="900" step="10" value="320">
+                </div>
+
+                <div class="setting-block">
+                  <div class="setting-label-row">
+                    <label for="note-gap-ms">Scale Note Gap</label>
+                    <output id="note-gap-value" for="note-gap-ms">55 ms</output>
+                  </div>
+                  <input id="note-gap-ms" type="range" min="0" max="300" step="5" value="55">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-group" id="single-note-group">
+          <label for="target-note">Target Note</label>
+          <select id="target-note"></select>
+        </div>
+
+        <div class="control-group hidden" id="scale-tonic-group">
+          <label for="scale-tonic">Scale Tonic</label>
+          <select id="scale-tonic"></select>
+        </div>
+
+        <div class="control-group hidden" id="scale-type-group">
+          <label for="scale-type">Scale Type</label>
+          <select id="scale-type">
+            <option value="major">Major</option>
+            <option value="natural_minor">Natural Minor</option>
+            <option value="harmonic_minor">Harmonic Minor</option>
+            <option value="melodic_minor">Melodic Minor</option>
+            <option value="major_pentatonic">Major Pentatonic</option>
+            <option value="minor_pentatonic">Minor Pentatonic</option>
+            <option value="blues">Blues</option>
+          </select>
+        </div>
+
+        <div class="control-group hidden" id="scale-loop-group">
+          <label for="loop-scale">
+            <input type="checkbox" id="loop-scale">
+            Loop Scale Playback
+          </label>
+        </div>
       </div>
 
-      <div class="control-group" id="single-note-group">
-        <label for="target-note">Target Note</label>
-        <select id="target-note"></select>
-      </div>
-
-      <div class="control-group hidden" id="scale-group">
-        <label for="target-scale">Scale</label>
-        <select id="target-scale">
-          <option value="C_major">C Major</option>
-          <option value="G_major">G Major</option>
-          <option value="D_major">D Major</option>
-          <option value="A_minor">A Minor</option>
-          <option value="E_minor">E Minor</option>
-          <option value="Pentatonic_C">C Pentatonic</option>
-        </select>
-      </div>
-
-      <div class="control-group actions">
+      <div class="controls-actions">
         <button id="start-btn" type="button">Start Monitoring</button>
         <button id="stop-btn" type="button" disabled>Stop</button>
+        <button id="play-reference-btn" type="button">Play Reference</button>
+        <button id="stop-reference-btn" type="button" class="secondary-btn" disabled>Stop Tone</button>
       </div>
     </section>
 
@@ -61,7 +126,7 @@
     </section>
 
     <section class="viz-panel">
-      <canvas id="pitch-canvas" width="1120" height="460" aria-label="Live pitch trace"></canvas>
+      <canvas id="pitch-canvas" width="1320" height="560" aria-label="Live pitch trace"></canvas>
       <p class="hint">Green trace means in tune (within 25 cents). Red means out of tune.</p>
     </section>
   </main>
